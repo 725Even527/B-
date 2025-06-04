@@ -1,0 +1,125 @@
+import os
+import re
+import time
+import glob
+import requests
+import xml.etree.ElementTree as ET
+import pandas as pd
+from bs4 import BeautifulSoup
+from datetime import datetime
+
+# --- 配置区 ---
+KEYWORD = "俄乌冲突"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                  " AppleWebKit/537.36 (KHTML, like Gecko)"
+                  " Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    "Referer": "https://www.bilibili.com/",
+}
+TMP_DIR = "../danmakus"
+OUT_DIR = "../output"
+os.makedirs(TMP_DIR, exist_ok=True)
+os.makedirs(OUT_DIR, exist_ok=True)
+
+# --- 工具函数 ---
+def format_time(sec):
+    m = int(sec // 60)
+    s = int(sec % 60)
+    return f"{m:02d}:{s:02d}"
+
+def format_timestamp(ts):
+    try:
+        return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+    except:
+        return "1970-01-01 00:00:00"
+
+def extract_bvid(url):
+    m = re.search(r"/(BV[0-9A-Za-z]+)", url)
+    return m.group(1) if m else None
+
+def get_cid(bvid):
+    api = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+    r = requests.get(api, headers=HEADERS, timeout=10)
+    js = r.json()
+    return js["data"]["cid"] if js.get("code")==0 and js["data"].get("cid") else None
+
+def fetch_danmaku(bvid):
+    cid = get_cid(bvid)
+    if not cid:
+        print(f"跳过 {bvid}：未取到CID")
+        return []
+    url = f"https://api.bilibili.com/x/v1/dm/list.so?oid={cid}"
+    r = requests.get(url, headers=HEADERS, timeout=10)
+    if not r.text.strip().startswith("<?xml"):
+        print(f"{bvid} 返回非XML，跳过")
+        return []
+    root = ET.fromstring(r.content)
+    lst = []
+    for d in root.findall("d"):
+        p = d.get("p","").split(",")
+        if len(p) < 8: continue
+        lst.append({
+            "BV号": bvid,
+            "弹幕时间": format_time(float(p[0])),
+            "模式": int(p[1]),
+            "字体大小": int(p[2]),
+            "颜色": int(p[3]),
+            "发送时间": format_timestamp(p[4]),
+            "弹幕池": int(p[5]),
+            "发送者ID": p[6],
+            "行ID": p[7],
+            "内容": d.text.strip() if d.text else ""
+        })
+    return lst
+
+def fetch_video_list(keyword):
+    base = f"https://search.bilibili.com/all?keyword={keyword}"
+    page = 1
+    bvs = []
+    while True:
+        url = f"{base}&page={page}"
+        print(f"爬第 {page} 页：{url}")
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        if r.status_code!=200: break
+        soup = BeautifulSoup(r.text, "html.parser")
+        cards = soup.find_all(class_="bili-video-card__wrap")
+        if not cards: break
+        for c in cards:
+            a = c.find("a")
+            url = ("https:" + a["href"]) if a and a.has_attr("href") else ""
+            bv = extract_bvid(url)
+            if bv: bvs.append(bv)
+        page += 1
+        time.sleep(1)
+    return list(dict.fromkeys(bvs))
+
+# --- 主流程 ---
+if __name__ == "__main__":
+    # 1. 抓BV列表
+    bv_list = fetch_video_list(KEYWORD)
+    print(f"共 {len(bv_list)} 个视频待处理")
+
+    # 2. 各自抓弹幕并写入临时xlsx
+    for bv in bv_list:
+        print(f"\n抓取弹幕：{bv}")
+        data = fetch_danmaku(bv)
+        if data:
+            df = pd.DataFrame(data)
+            tmp_file = os.path.join(TMP_DIR, f"danmakus_{bv}.xlsx")
+            df.to_excel(tmp_file, index=False, engine="openpyxl")
+            print(f"已保存 {tmp_file}")
+        else:
+            print(f"{bv} 无弹幕，跳过")
+        time.sleep(2)
+
+    # 3. 合并所有弹幕到一个表
+    all_files = glob.glob(os.path.join(TMP_DIR, "danmakus_*.xlsx"))
+    if all_files:
+        dfs = [pd.read_excel(f, engine="openpyxl") for f in all_files]
+        combined = pd.concat(dfs, ignore_index=True)
+        out_file = os.path.join(OUT_DIR, "combined_danmakus_all.xlsx")
+        combined.to_excel(out_file, index=False, engine="openpyxl")
+        print(f"\n合并完成，文件位于：{out_file}")
+    else:
+        print("未找到任何临时弹幕文件，合并失败。")
