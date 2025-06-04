@@ -26,8 +26,7 @@
 TF-IDF 表格（可排序）
 情感分析统计图（饼图/条形图）
 
-(1)
-📥 弹幕爬取脚本（爬取.py）说明
+## 📊 第一部分：弹幕爬取（爬取.py）说明
 
 该脚本用于从Bilibili自动搜索并下载与指定关键词相关视频的弹幕数据，并保存为 Excel 文件，便于后续分析。
 
@@ -62,7 +61,7 @@ KEYWORD = "Python"
 #### 3️⃣ 运行脚本
 
 ```bash
-python danmaku_crawler.py
+python 爬取.py
 ```
 
 #### 4️⃣ 输出文件位置
@@ -108,6 +107,188 @@ TMP_DIR = "../danmakus"   # 改成你喜欢的文件夹路径
 OUT_DIR = "../output"     # 改成你希望的输出路径
 ```
 
- ❤️ 后续步骤
-完成爬取后，可以继续使用我们提供的分析和可视化脚本，对弹幕内容进行深入挖掘与展示。
+
+---
+
+## 📊 第二部分：弹幕数据分析与处理（Python 分析脚本）
+
+本模块将抓取好的弹幕 Excel 文件进行处理分析，生成分词、关键词、词频、情感标签等结果，并输出可视化图表。适合零基础用户逐步理解和修改。
+
+### ✅ 1. 读取与清洗数据
+
+```python
+df = pd.read_excel(data_path)
+df = df[['内容']].dropna().drop_duplicates()
+df = df[df['内容'].astype(str).str.len() >= 4]
+```
+
+* 读取合并后的弹幕文件 `combined_danmakus_all.xlsx`
+* 清除空值、重复项，过滤长度 < 4 的短弹幕，保留有效数据
+
+---
+
+### ✅ 2. 加载词典与停用词
+
+```python
+jieba.load_userdict('./stop_dict/keep_words.txt')
+```
+
+* 加载自定义保留词（如专有名词、B站用语）
+* 停用词来自多个文件合并，剔除常见无意义词（如“的”、“了”、“啊”）
+
+---
+
+### ✅ 3. 中文分词
+
+```python
+df['分词'] = df['内容'].astype(str).map(get_cut_content)
+```
+
+* 使用 `jieba.cut()` 分词，保留长度 > 1 的词
+* 剔除数字、停用词等噪声
+* 结果保存为 `分词结果.xlsx`
+
+---
+
+### ✅ 4. TF-IDF 关键词提取
+
+```python
+tfidf_tags = analyse.extract_tags(文本, topK=50, withWeight=True)
+```
+
+* 从所有弹幕中提取前 50 个最具代表性的关键词
+* 结果保存为 `TF-IDF关键词.csv`
+
+---
+
+### ✅ 5. 词频统计与 Top20 输出
+
+```python
+word_counts = Counter(all_words)
+```
+
+* 统计所有词语出现的频率
+* 输出完整统计与 Top20 词频列表：`词频统计.csv`, `词频Top20.csv`
+
+---
+
+### ✅ 6. 高频词柱状图
+
+```python
+plt.bar(top_words_df['word'], top_words_df['count'])
+```
+
+* 可视化显示最常出现的前 20 个词
+* 输出为 `高频词柱状图.png`
+
+---
+
+### ✅ 7. 词云图
+
+```python
+WordCloud().generate_from_frequencies(word_counts)
+```
+
+* 基于词频生成形状美观的中文词云
+* 输出为 `词云图.jpg`
+
+---
+
+### ✅ 8. 情感分析（正向/负向）
+
+```python
+predict_sentiment(text)
+```
+
+* 使用预训练模型（`RoBERTa`）对每条弹幕判断情感：正向 / 负向
+* 输出文件：`弹幕情感分析结果.csv`，含标签和置信度
+* 注意：这一部分会比较吃电脑配置，有能力的可以自行选择使用云算力进行。
+---
+
+### 🗂 输出结果文件包括：
+
+* `分词结果.xlsx`
+* `TF-IDF关键词.csv`
+* `词频统计.csv`、`词频Top20.csv`
+* `词云图.jpg`、`高频词柱状图.png`
+* `弹幕情感分析结果.csv`
+
+---
+
+## 🌐 第三部分：交互式可视化展示HTML 页面（可视化.py）
+
+本模块使用 `pyecharts` 将前一步生成的词频、关键词和情感分析结果图形化，并输出为可交互的 HTML 页面，方便展示与分享。
+
+---
+
+### ✅ 1. TF-IDF 关键词柱状图
+
+```python
+Bar().add_xaxis(...).add_yaxis(...).set_global_opts(...)
+```
+
+* 展示 TF-IDF 提取的关键词及其重要性
+* 支持鼠标缩放、横轴滚动、悬浮提示等交互操作
+* 图表主题风格使用 `macarons`
+
+---
+
+### ✅ 2. 高频词词云图
+
+```python
+WordCloud().add(...).set_global_opts(...)
+```
+
+* 以词频大小可视化展示关键词热度
+* 词频越高，字体越大，便于一眼识别高频词
+* 自动适配尺寸与布局，居中展示
+
+---
+
+### ✅ 3. 弹幕情感分析饼图
+
+```python
+Pie().add(...).set_series_opts(...)
+```
+
+* 统计情感标签中正向与负向的占比
+* 自动显示每类占比百分比
+* 点击可聚焦每一类别，提升交互性
+
+---
+
+### ✅ 4. 词频Top20柱状图
+
+```python
+Bar().add_xaxis(...).add_yaxis(...).set_global_opts(...)
+```
+
+* 统计弹幕中最常出现的前 20 个词
+* 横轴旋转显示，清晰展示文字
+* 图表主题使用 `romantic`，风格更轻快
+
+---
+
+### ✅ 5. 汇总输出 HTML 页面
+
+```python
+page = Page(layout=Page.DraggablePageLayout)
+page.add(...)
+page.render("分析可视化展示.html")
+```
+
+* 使用可拖拽的布局组件 `DraggablePageLayout`
+* 将多个图表整合到一个页面，方便演示和交互
+* 输出文件：`分析可视化展示.html`
+
+---
+
+📁 最终生成的 HTML 文件支持本地或网页打开，鼠标可拖拽、缩放、悬浮查看，适用于研究展示、项目汇报或公众号发布。
+
+---
+
+需要我帮你把前后所有内容整合成一个完整的文档版本（带结构目录、标题等）吗？
+
+
+
 
